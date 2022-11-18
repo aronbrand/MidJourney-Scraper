@@ -12,11 +12,9 @@ Enhanced version.
 
 This will download all of the midjourny renders.  All you need to do is provide a user id and your session id from your browser.
 
-If you add this to the top of the sync.py script then it only needs to be added once:
-SESSION_TOKEN = "eyJ..."
-USER_ID = "4.." 
+You supply the needed parameters from the command line , or by setting the environment variables MJ_API_TOKEN (session token) and MJ_USER_ID
 
-To get the session id go into the developer tools. CLick on the application tab winthin the developer tool bar,  click on cookes on the left and use
+To get the session id go into the developer tools. CLick on the application tab winthin the developer tool bar,  click on cookies on the left and use
 __Secure-next-auth.session-token cookie. 
 
 If you don't provide a userid it will download your own files.
