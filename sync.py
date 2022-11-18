@@ -51,22 +51,21 @@ def main():
 				print (r.json()) 
 
 			for render in r.json():
-				dex = 0
 				foundImage = 0
 				if 'image_paths' in render:
 					renderName = slugify(render['full_command'])
 
-					if str(renderName) not in db:
-						db[renderName] = render
-						if write_json:
-							write_json(render, renderName+".json") 
+					if write_json:
+						write_json(render, renderName+".json") 
 
-						for image in render['image_paths']:						
+					for image in render['image_paths']:
+						filename = renderName + render['id']+".png"
+						if str(filename) not in db:
+							db[filename] = True			
 							print("Syncing: " + str(totalImages) + ") -> "+ render['full_command'])
-							download_image(image, renderName+str(dex)+".png")
-							dex += 1
-							foundImage += 1
-							totalImages += 1
+							download_image(image, filename)
+						foundImage += 1
+						totalImages += 1
 			# no images left.
 			if foundImage == 0:
 				break
@@ -89,7 +88,7 @@ def slugify(value, allow_unicode=False):
         value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
     value = re.sub(r'[^\w\s-]', '', value.lower())
     ret = re.sub(r'[-\s]+', '-', value).strip('-_')
-    return ret[0:248]
+    return ret[0:200]
 
 def write_json(obj, path):
 	# only sync new files.
