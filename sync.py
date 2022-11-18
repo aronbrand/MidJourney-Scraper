@@ -1,45 +1,76 @@
-
 #!/usr/bin/env python3
 
 import requests
 import unicodedata
+import argparse
 import re
-import json 
+import json
+import os
+import logging
+import shelve
 from os.path import exists
 
-# The userid you would like to download from:
-USER_ID=""
-# The session id of ou logged in, starts with eyJ:
-SESSION_TOKEN=""
-
+def environ_or_required(key):
+    return (
+        {'default': os.environ.get(key)} if os.environ.get(key)
+        else {'required': True}
+    )
 
 def main():
-	global SESSION_TOKEN, USER_ID
-	if not len(SESSION_TOKEN):
-		SESSION_TOKEN = input("What is your MidJourney Session ID? (hint: it starts with eyJ and you get it from your browser): ")
+	parser = argparse.ArgumentParser(description='Sync files from Midjourney',fromfile_prefix_chars='@')
 
-	cookies = {'__Secure-next-auth.session-token': SESSION_TOKEN}
+	parser.add_argument('--token', type=str, help='Midjourney session token', **environ_or_required('MJ_API_TOKEN') )
+	parser.add_argument('--uid', type=str, **environ_or_required('MJ_USER_ID'))
+	parser.add_argument('--filter', choices=['upscale', 'grid','all'], default='upscale')
+	parser.add_argument('--debug', action='store_true')
+	parser.add_argument('--json', action='store_true')
+	parser.add_argument('--db', type=str, help='DB file for caching already downloaded prompts', default="mjcache")
+
+	args=parser.parse_args()
+
+	session_token = args.token
+	user_id = args.uid
+	img_type = args.filter
+	write_json = args.json
+	debug = args.debug
+	dbfile = args.db
+
+	logging.getLogger('root').setLevel(logging.INFO)
+
+	if not len(session_token):
+		session_token = input("What is your MidJourney Session ID? (hint: it starts with eyJ and you get it from your browser): ")
+
+	cookies = {'__Secure-next-auth.session-token': session_token}
 	page = 1
 	totalImages = 0 
-	while(True):
-		r = requests.get("https://www.midjourney.com/api/app/recent-jobs/?orderBy=new&jobStatus=completed&userId="+USER_ID+"&dedupe=true&refreshApi=0&page="+str(page), cookies=cookies)
-		for render in r.json():
-			dex = 0
-			foundImage = 0
-			if 'image_paths' in render:
-				renderName = slugify(render['full_command'])
-				write_json(render, renderName+".json")
-				# download_image("https://mj-gallery.com/"+render['id']+"/grid_0.png",renderName+"_hq.png")
-				for image in render['image_paths']:
-					print("Syncing: " + str(totalImages) + ") -> "+ render['full_command'])
-					download_image(image, renderName+str(dex)+".png")
-					dex += 1
-					foundImage += 1
-					totalImages += 1
-		# no images left.
-		if foundImage == 0:
-			break
-		page += 1;
+
+	with shelve.open(dbfile, flag='c') as db:
+		while(True):
+			r = requests.get("https://www.midjourney.com/api/app/recent-jobs/?amount=50&jobType="+img_type+"&orderBy=new&user_id_ranked_score=null&jobStatus=completed&userId="+user_id+"&dedupe=true&refreshApi=0&page="+str(page), cookies=cookies)
+			if debug:
+				print (r.json()) 
+
+			for render in r.json():
+				dex = 0
+				foundImage = 0
+				if 'image_paths' in render:
+					renderName = slugify(render['full_command'])
+
+					if str(renderName) not in db:
+						db[renderName] = render
+						if write_json:
+							write_json(render, renderName+".json") 
+
+						for image in render['image_paths']:						
+							print("Syncing: " + str(totalImages) + ") -> "+ render['full_command'])
+							download_image(image, renderName+str(dex)+".png")
+							dex += 1
+							foundImage += 1
+							totalImages += 1
+			# no images left.
+			if foundImage == 0:
+				break
+			page += 1;
 
 def slugify(value, allow_unicode=False):
     """
@@ -67,6 +98,7 @@ def write_json(obj, path):
 		info.write(json.dumps(obj))
 		info.close()
 
+
 def download_image(url, path):
 	# only sync new files.
 	if not exists(path):
@@ -75,6 +107,9 @@ def download_image(url, path):
 			with open(path, 'wb') as f:
 				for chunk in r:
 					f.write(chunk)
+		print ("DONE\n") 	
+	else:
+		print ("SKIPPED\n") 				
 
 if __name__ == "__main__":
 	main()
