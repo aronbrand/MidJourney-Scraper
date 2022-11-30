@@ -8,7 +8,8 @@ import json
 import os
 import logging
 import shelve
-from os.path import exists
+import asyncio
+import httpx
 
 def environ_or_required(key):
     return (
@@ -25,6 +26,7 @@ def main():
 	parser.add_argument('--debug', action='store_true')
 	parser.add_argument('--json', action='store_true')
 	parser.add_argument('--db', type=str, help='DB file for caching already downloaded prompts', default="mjcache")
+	parser.add_argument('--chrome', action='store_true')
 
 	args=parser.parse_args()
 
@@ -34,6 +36,7 @@ def main():
 	write_json = args.json
 	debug = args.debug
 	dbfile = args.db
+	chrome = args.chrome
 
 	logging.getLogger('root').setLevel(logging.INFO)
 
@@ -46,11 +49,16 @@ def main():
 
 	with shelve.open(dbfile, flag='c') as db:
 		while(True):
-			r = requests.get("https://www.midjourney.com/api/app/recent-jobs/?amount=50&jobType="+img_type+"&orderBy=new&user_id_ranked_score=null&jobStatus=completed&userId="+user_id+"&dedupe=true&refreshApi=0&page="+str(page), cookies=cookies)
+			url = "https://www.midjourney.com/api/app/recent-jobs/?amount=50&jobType="+img_type+"&orderBy=new&user_id_ranked_score=null&jobStatus=completed&userId="+user_id+"&dedupe=true&refreshApi=0&page="+str(page)
+			r = requests.get(url, cookies=cookies).json()
 			if debug:
-				print (r.json()) 
+				print (r) 
 
-			for render in r.json():
+			if ('msg' in r):
+				print (r['msg'])
+				exit (1)
+
+			for render in r:
 				foundImage = 0
 				if 'image_paths' in render:
 					renderName = slugify(render['full_command'])
