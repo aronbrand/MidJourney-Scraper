@@ -10,6 +10,7 @@ Enhanced version.
 - Cache database avoids downloading even if you already deleted the downloaded files
 - Fetch parameters from command line or environment variable
 - Filter to download only upscaled renders, grids, or both
+- Uses async HTTP requests for improved performance
 
 This will download all of the midjourny renders.  All you need to do is provide a user id and your session id from your browser.
 
