@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import requests
+from genericpath import exists
 import unicodedata
 import argparse
 import re
@@ -9,7 +9,8 @@ import os
 import logging
 import shelve
 import asyncio
-import httpx
+import aiohttp
+import time
 
 def environ_or_required(key):
     return (
@@ -17,7 +18,7 @@ def environ_or_required(key):
         else {'required': True}
     )
 
-def main():
+def parse_cmdline():
 	parser = argparse.ArgumentParser(description='Sync files from Midjourney',fromfile_prefix_chars='@')
 
 	parser.add_argument('--token', type=str, help='Midjourney session token', **environ_or_required('MJ_API_TOKEN') )
@@ -26,9 +27,13 @@ def main():
 	parser.add_argument('--debug', action='store_true')
 	parser.add_argument('--json', action='store_true')
 	parser.add_argument('--db', type=str, help='DB file for caching already downloaded prompts', default="mjcache")
-	parser.add_argument('--chrome', action='store_true')
 
-	args=parser.parse_args()
+	return parser.parse_args()
+
+
+async def main():
+
+	args=parse_cmdline()
 
 	session_token = args.token
 	user_id = args.uid
@@ -36,7 +41,6 @@ def main():
 	write_json = args.json
 	debug = args.debug
 	dbfile = args.db
-	chrome = args.chrome
 
 	logging.getLogger('root').setLevel(logging.INFO)
 
@@ -48,36 +52,47 @@ def main():
 	totalImages = 0 
 
 	with shelve.open(dbfile, flag='c') as db:
-		while(True):
-			url = "https://www.midjourney.com/api/app/recent-jobs/?amount=50&jobType="+img_type+"&orderBy=new&user_id_ranked_score=null&jobStatus=completed&userId="+user_id+"&dedupe=true&refreshApi=0&page="+str(page)
-			r = requests.get(url, cookies=cookies).json()
-			if debug:
-				print (r) 
+		# create a list of download tasks
+		tasks = []
 
-			if ('msg' in r):
-				print (r['msg'])
-				exit (1)
+		async with aiohttp.ClientSession() as session:
+			while(True):
+				url = "https://www.midjourney.com/api/app/recent-jobs/?amount=50&jobType="+img_type+ \
+					"&orderBy=new&user_id_ranked_score=null&jobStatus=completed&userId="+user_id+"&dedupe=true&refreshApi=0&page="+str(page)
+				async with session.get(url, cookies=cookies) as response:
+					r = await response.json()
 
-			for render in r:
-				foundImage = 0
-				if 'image_paths' in render:
-					renderName = slugify(render['full_command'])
+				if debug:
+					print (r) 
 
-					if write_json:
-						write_json(render, renderName+".json") 
+				if ('msg' in r):
+					print (r['msg'])
+					exit (1)
 
-					for image in render['image_paths']:
-						filename = renderName + render['id']+".png"
-						if str(filename) not in db:
-							db[filename] = True			
-							print("Syncing: " + str(totalImages) + ") -> "+ render['full_command'])
-							download_image(image, filename)
-						foundImage += 1
-						totalImages += 1
-			# no images left.
-			if foundImage == 0:
-				break
-			page += 1;
+				for render in r:
+					foundImage = 0
+					if 'image_paths' in render:
+						renderName = slugify(render['full_command'])
+
+						if write_json:
+							write_json(render, renderName+".json") 
+
+						for image in render['image_paths']:
+							filename = renderName + render['id']+".png"
+							if str(filename) not in db:
+								db[filename] = True			
+								print("Queueing: " + str(totalImages) + ") -> "+ render['full_command'])
+								tasks.append(download_image(session, image, filename))
+
+							foundImage += 1
+							totalImages += 1
+				# no images left.
+				if foundImage == 0:
+					break
+				page += 1;
+
+			# wait for all download tasks to complete
+			await asyncio.gather(*tasks)
 
 def slugify(value, allow_unicode=False):
     """
@@ -105,18 +120,23 @@ def write_json(obj, path):
 		info.write(json.dumps(obj))
 		info.close()
 
+async def download_image(session , url : str, path : str):
+	print ("Starting download: ",path, "...", sep=None)
 
-def download_image(url, path):
-	# only sync new files.
 	if not exists(path):
-		r = requests.get(url, stream=True)
-		if r.status_code == 200:
-			with open(path, 'wb') as f:
-				for chunk in r:
-					f.write(chunk)
-		print ("DONE\n") 	
+			start_time = time.time()
+			async with session.get(url) as r:
+				if r.status == 200:
+					with open(path, 'wb') as f:
+						while True:
+							chunk = await r.content.read(1024)
+							if not chunk:
+								break
+							f.write(chunk)
+				elapsed_time = time.time() - start_time
+				print (path, ": DONE (elapsed time: {:.2f} seconds)\n".format(elapsed_time))
 	else:
-		print ("SKIPPED\n") 				
+		print ("SKIPPED\n")			
 
 if __name__ == "__main__":
-	main()
+	asyncio.run(main())
